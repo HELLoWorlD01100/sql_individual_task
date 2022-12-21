@@ -64,7 +64,7 @@ FROM Moskvin.Purchases purchases
 -- 8. Вывести все сведения о поставке (все поля таблицы Purchases), 
 -- а также название книги (поле Title_book) с минимальной общей стоимостью (использовать поля Cost и Amount).
 
-SELECT Code_purchase AS [Код поставки], Date_order AS [Дата поставки], Type_purchase AS [Тип поставки], 
+SELECT Code_purchase AS [Код поставки], FORMAT(Date_order, 'D') AS [Дата поставки], Type_purchase AS [Тип поставки], 
 	Cost AS [Цена за книгу], Amount AS [Количество], Code_delivery AS [Код поставщика], books.Title_book AS [Название книги]
 FROM Moskvin.Purchases purchases
 	INNER JOIN Moskvin.Books AS books
@@ -74,9 +74,6 @@ WHERE (purchases.Cost * purchases.Amount) = minTotalCost
 
 -- 9. Вывести список сделок (все поля из таблицы Purchases) 
 -- за последний месяц (условие с использованием поля Date_order).
-
-INSERT INTO Moskvin.Purchases(Code_purchase, Date_order, Type_purchase, Cost, Amount, Code_delivery, Code_book)
-VALUES (1448, '2022-12-13', 1, 228, 9, 9, 21)
 
 SELECT Code_purchase AS [Код поставки], Date_order AS [Дата поставки], Type_purchase AS [Тип поставки], 
 	Cost AS [Цена за книгу], Amount AS [Количество], Code_delivery AS [Код поставщика] 
@@ -119,22 +116,38 @@ GO
 
 -- 14. Создать триггер для команд INSERT и UPDATE таблицы Books, 
 -- запрещающий производить изменения для издательства, у которого не заполнено поле город.
-SELECT * FROM Moskvin.Books
+
 CREATE TRIGGER WithoutCityTrigger 
 	ON Moskvin.Books 
-	FOR INSERT, UPDATE AS 
+	FOR INSERT, UPDATE AS
 		IF EXISTS (SELECT * FROM inserted source 
 			INNER JOIN Moskvin.Publishing_house publishing_house
 				ON source.Code_publish = publishing_house.Code_publish
-			WHERE publishing_house.City = NULL)
+			WHERE publishing_house.City IS NULL)
+			BEGIN
+				PRINT('Нельзя добавлять книги, изданные в издании без города.')
 				ROLLBACK TRANSACTION
-
+			END
 		IF EXISTS (SELECT * FROM deleted source 
 			INNER JOIN Moskvin.Publishing_house publishing_house
 				ON source.Code_publish = publishing_house.Code_publish
-			WHERE publishing_house.City = NULL)
+			WHERE publishing_house.City IS NULL)
+			BEGIN
+				PRINT('Нельзя обновлять книги, изданные в издании без города.')
 				ROLLBACK TRANSACTION
+			END
 GO
+
+
+-- TESTS Trigger
+DELETE FROM Moskvin.Books WHERE Code_book = 666
+INSERT INTO Moskvin.Books(Code_book, Title_book, Pages, Code_author, Code_publish)
+VALUES
+	(666, 'book37', 29, 11, 228)
+
+UPDATE Moskvin.Books
+SET Pages = 13
+WHERE Code_book = 555
 
 -- 15. Создать процедуру, которая для указанного издательства выводит информацию о продажах: 
 -- Дата, Книга, Поставщик, Общая стоимость, отсортированную по дате, по каждому месяцу показать итог,
@@ -145,7 +158,7 @@ DROP PROCEDURE Moskvin.GetSalesInformationByPublishingHouse
 CREATE PROCEDURE Moskvin.GetSalesInformationByPublishingHouse
 	@Publish varchar(40)
 AS 
-	SELECT Date_order AS [Дата], books.Title_book AS [Название книги], deliveries.Name_delivery AS [Поставщик], 
+	SELECT FORMAT(Date_order, 'D') AS [Дата], books.Title_book AS [Название книги], deliveries.Name_delivery AS [Поставщик], 
 		SUM(Cost * Amount) AS [Общая стоимость]  FROM Moskvin.Purchases purchases
 		INNER JOIN Moskvin.Books books
 			ON purchases.Code_book = books.Code_book
@@ -156,7 +169,30 @@ AS
 	WHERE publish.Publish = @Publish
 	GROUP BY Date_order, books.Title_book,  deliveries.Name_delivery
 	ORDER BY Date_order DESC
+
+	SELECT FORMAT(Date_order, 'Y') AS [Дата], books.Title_book AS [Название книги], deliveries.Name_delivery AS [Поставщик], 
+		SUM(Cost * Amount) AS [Общая стоимость]  FROM Moskvin.Purchases purchases
+		INNER JOIN Moskvin.Books books
+			ON purchases.Code_book = books.Code_book
+		INNER JOIN Moskvin.Publishing_house  publish
+			ON books.Code_publish = publish.Code_publish
+		INNER JOIN Moskvin.Deliveries deliveries 
+			ON purchases.Code_delivery = deliveries.Code_delivery
+	WHERE publish.Publish = @Publish
+	GROUP BY FORMAT(Date_order, 'Y'), books.Title_book,  deliveries.Name_delivery
+	ORDER BY YEAR(FORMAT(Date_order, 'Y')), MONTH(FORMAT(Date_order, 'Y')) ASC
+
+	SELECT books.Title_book AS [Название книги], deliveries.Name_delivery AS [Поставщик], 
+		SUM(Cost * Amount) AS [Общая стоимость]  FROM Moskvin.Purchases purchases
+		INNER JOIN Moskvin.Books books
+			ON purchases.Code_book = books.Code_book
+		INNER JOIN Moskvin.Publishing_house  publish
+			ON books.Code_publish = publish.Code_publish
+		INNER JOIN Moskvin.Deliveries deliveries 
+			ON purchases.Code_delivery = deliveries.Code_delivery
+	WHERE publish.Publish = @Publish
+	GROUP BY books.Title_book,  deliveries.Name_delivery
 GO
 
 EXEC Moskvin.GetSalesInformationByPublishingHouse @Publish='Наука' ; 
-GO  
+GO
